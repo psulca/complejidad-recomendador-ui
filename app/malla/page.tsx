@@ -50,6 +50,7 @@ export default function MallaPage() {
   const [carreraSeleccionada, setCarreraSeleccionada] = useState<string>("all");
   const [tooltip, setTooltip] = useState<{ content: string; x: number; y: number } | null>(null);
   const [mousePos, setMousePos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const graphRef = useRef<any>(null);
 
@@ -294,65 +295,167 @@ export default function MallaPage() {
           <span className="ml-3">Generando visualización...</span>
         </div>
       ) : (
-        <ForceGraph2D
-          ref={graphRef}
-          graphData={data}
-          nodeLabel=""
-          nodeAutoColorBy="nivel"
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          onNodeHover={(node: any) => {
-            if (node) {
-              const n = node as GraphNode;
-              let content = n.label || '';
-              // Solo mostrar créditos generales si se seleccionó una carrera específica
-              if (carreraSeleccionada !== "all" && n.creditos_generales_requeridos) {
-                content += '\nRequiere ' + n.creditos_generales_requeridos + ' CRED generales';
-              }
-              setTooltip({ content, x: mousePos.x, y: mousePos.y });
-            } else {
-              setTooltip(null);
-            }
-          }}
-          onBackgroundClick={() => setTooltip(null)}
-          onLinkClick={() => setTooltip(null)}
-          nodeCanvasObject={(node: object, ctx: CanvasRenderingContext2D, globalScale: number) => {
-            const n = node as GraphNode;
-            // Mostrar solo el código, no la PK compuesta completa
-            const label = n.codigo || n.id.split('|')[0] || n.id; 
-            const fontSize = 12/globalScale;
-            ctx.font = `${fontSize}px Sans-Serif`;
-            
-            if (n.x !== undefined && n.y !== undefined) {
-              ctx.beginPath();
-              ctx.arc(n.x, n.y, 5, 0, 2 * Math.PI, false);
-              ctx.fillStyle = n.color || '#6366f1';
-              ctx.fill();
+         <ForceGraph2D
+           ref={graphRef}
+           graphData={data}
+           nodeLabel=""
+           nodeAutoColorBy="nivel"
+           // eslint-disable-next-line @typescript-eslint/no-explicit-any
+           onNodeHover={(node: any) => {
+             if (node) {
+               const n = node as GraphNode;
+               let content = n.label || '';
+               // Solo mostrar créditos generales si se seleccionó una carrera específica
+               if (carreraSeleccionada !== "all" && n.creditos_generales_requeridos) {
+                 content += '\nRequiere ' + n.creditos_generales_requeridos + ' CRED generales';
+               }
+               setTooltip({ content, x: mousePos.x, y: mousePos.y });
+             } else {
+               setTooltip(null);
+             }
+           }}
+           // eslint-disable-next-line @typescript-eslint/no-explicit-any
+           onNodeClick={(node: any) => {
+             const n = node as GraphNode;
+             // Si se hace click en el mismo nodo, deseleccionar
+             if (selectedNode?.id === n.id) {
+               setSelectedNode(null);
+               // Zoom out suave sin recargar
+               if (graphRef.current) {
+                 setTimeout(() => {
+                   if (graphRef.current) {
+                     graphRef.current.zoomToFit(800);
+                   }
+                 }, 50);
+               }
+             } else {
+               // Actualizar selección primero
+               setSelectedNode(n);
+               // Zoom al nodo seleccionado con animación más suave
+               if (graphRef.current && n.x !== undefined && n.y !== undefined) {
+                 // Usar setTimeout para permitir que el estado se actualice primero
+                 setTimeout(() => {
+                   if (graphRef.current && n.x !== undefined && n.y !== undefined) {
+                     graphRef.current.centerAt(n.x, n.y, 1500);
+                     graphRef.current.zoom(1.8, 1500);
+                   }
+                 }, 10);
+               }
+             }
+           }}
+           onBackgroundClick={() => {
+             setTooltip(null);
+             // Deseleccionar suavemente
+             if (selectedNode) {
+               setSelectedNode(null);
+               if (graphRef.current) {
+                 setTimeout(() => {
+                   if (graphRef.current) {
+                     graphRef.current.zoomToFit(800);
+                   }
+                 }, 50);
+               }
+             }
+           }}
+           onLinkClick={() => setTooltip(null)}
+           nodeCanvasObject={(node: object, ctx: CanvasRenderingContext2D, globalScale: number) => {
+             const n = node as GraphNode;
+             // Mostrar solo el código, no la PK compuesta completa
+             const label = n.codigo || n.id.split('|')[0] || n.id; 
+             const fontSize = Math.max(10, 12/globalScale);
+             const padding = 8;
+             
+             if (n.x !== undefined && n.y !== undefined) {
+               // Medir el texto para calcular el ancho del rectángulo
+               ctx.font = `${fontSize}px Sans-Serif`;
+               const textMetrics = ctx.measureText(label);
+               const textWidth = textMetrics.width;
+               const rectWidth = textWidth + padding * 2;
+               const rectHeight = fontSize + padding * 2;
+               
+               // Determinar si el nodo está seleccionado
+               const isSelected = selectedNode?.id === n.id;
+               
+               // Dibujar rectángulo con fondo
+               ctx.fillStyle = isSelected ? '#fbbf24' : (n.color || '#6366f1');
+               ctx.strokeStyle = isSelected ? '#f59e0b' : '#fff';
+               ctx.lineWidth = isSelected ? 3 : 2;
+               
+               // Rectángulo redondeado
+               const radius = 6;
+               const x = n.x - rectWidth / 2;
+               const y = n.y - rectHeight / 2;
+               
+               ctx.beginPath();
+               ctx.moveTo(x + radius, y);
+               ctx.lineTo(x + rectWidth - radius, y);
+               ctx.quadraticCurveTo(x + rectWidth, y, x + rectWidth, y + radius);
+               ctx.lineTo(x + rectWidth, y + rectHeight - radius);
+               ctx.quadraticCurveTo(x + rectWidth, y + rectHeight, x + rectWidth - radius, y + rectHeight);
+               ctx.lineTo(x + radius, y + rectHeight);
+               ctx.quadraticCurveTo(x, y + rectHeight, x, y + rectHeight - radius);
+               ctx.lineTo(x, y + radius);
+               ctx.quadraticCurveTo(x, y, x + radius, y);
+               ctx.closePath();
+               ctx.fill();
+               ctx.stroke();
 
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'middle';
-              ctx.fillStyle = '#e2e8f0';
-              ctx.fillText(label, n.x, n.y + 8);
-            }
-          }}
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          linkColor={(link: any) => {
-            const l = link as GraphLink;
-            // Color según créditos requeridos
-            const creditos = l.creditos_requeridos;
-            
-            // Si no tiene créditos requeridos (tipo COURSE sin créditos)
-            if (!creditos && l.tipo !== "COURSE_CRED") {
-              return "#475569"; // Gris para sin requisitos de créditos
-            }
-            
-            // Si tiene créditos requeridos
-            if (creditos && creditos <= 50) return "#22c55e"; // Verde para 0-50 créditos
-            if (creditos && creditos <= 100) return "#eab308"; // Amarillo para 51-100 créditos
-            if (creditos && creditos <= 150) return "#f97316"; // Naranja para 101-150 créditos
-            if (creditos) return "#ef4444"; // Rojo para 150+ créditos
-            return "#475569";
-          }}
-          linkWidth={2}
+               // Texto del código
+               ctx.textAlign = 'center';
+               ctx.textBaseline = 'middle';
+               ctx.fillStyle = '#fff';
+               ctx.font = `bold ${fontSize}px Sans-Serif`;
+               ctx.fillText(label, n.x, n.y);
+             }
+           }}
+           // eslint-disable-next-line @typescript-eslint/no-explicit-any
+           linkColor={(link: any) => {
+             const l = link as GraphLink;
+             
+             // Si hay un nodo seleccionado, verificar si esta conexión está relacionada
+             if (selectedNode) {
+               const sourceId = typeof l.source === 'string' ? l.source : l.source.id;
+               const targetId = typeof l.target === 'string' ? l.target : l.target.id;
+               const selectedId = selectedNode.id;
+               
+               // Si la conexión está relacionada con el nodo seleccionado, usar color destacado
+               if (sourceId === selectedId || targetId === selectedId) {
+                 return "#fbbf24"; // Amarillo brillante para conexiones del nodo seleccionado
+               }
+             }
+             
+             // Color según créditos requeridos (para conexiones no seleccionadas)
+             const creditos = l.creditos_requeridos;
+             
+             // Si no tiene créditos requeridos (tipo COURSE sin créditos)
+             if (!creditos && l.tipo !== "COURSE_CRED") {
+               return "#475569"; // Gris para sin requisitos de créditos
+             }
+             
+             // Si tiene créditos requeridos
+             if (creditos && creditos <= 50) return "#22c55e"; // Verde para 0-50 créditos
+             if (creditos && creditos <= 100) return "#eab308"; // Amarillo para 51-100 créditos
+             if (creditos && creditos <= 150) return "#f97316"; // Naranja para 101-150 créditos
+             if (creditos) return "#ef4444"; // Rojo para 150+ créditos
+             return "#475569";
+           }}
+           // eslint-disable-next-line @typescript-eslint/no-explicit-any
+           linkWidth={(link: any) => {
+             const l = link as GraphLink;
+             
+             // Si hay un nodo seleccionado, hacer las conexiones relacionadas más gruesas
+             if (selectedNode) {
+               const sourceId = typeof l.source === 'string' ? l.source : l.source.id;
+               const targetId = typeof l.target === 'string' ? l.target : l.target.id;
+               const selectedId = selectedNode.id;
+               
+               if (sourceId === selectedId || targetId === selectedId) {
+                 return 4; // Más grueso para conexiones del nodo seleccionado
+               }
+             }
+             
+             return 2; // Grosor normal
+           }}
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           linkLabel={(link: any) => {
             const l = link as GraphLink;
@@ -368,14 +471,23 @@ export default function MallaPage() {
             
             return nombreCurso ? `${nombreCurso}\nSe necesitan ${creditos} CRED` : `Se necesitan ${creditos} CRED`;
           }}
-          backgroundColor="#0f172a"
-          nodeRelSize={6}
-          linkDirectionalArrowLength={3.5}
-          linkDirectionalArrowRelPos={1}
-          d3VelocityDecay={0.3}
-          d3AlphaDecay={0.02}
-          cooldownTicks={100}
-          onEngineStop={() => graphRef.current?.zoomToFit(400)}
+           backgroundColor="#0f172a"
+           nodeRelSize={6}
+           linkDirectionalArrowLength={3.5}
+           linkDirectionalArrowRelPos={1}
+           d3VelocityDecay={0.5}
+           d3AlphaDecay={0.02}
+           cooldownTicks={150}
+           warmupTicks={0}
+           onEngineStop={() => {
+             // Solo hacer zoom inicial si no hay nodo seleccionado
+             if (!selectedNode && graphRef.current) {
+               graphRef.current.zoomToFit(400);
+             }
+           }}
+           enablePanInteraction={true}
+           enableZoomInteraction={true}
+           enableNodeDrag={false}
         />
       )}
       
