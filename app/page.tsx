@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import axios from 'axios';
-import { BookOpen, Flame, GraduationCap, RefreshCw, Trash2, Search, Plus, Network, LogOut } from 'lucide-react';
+import { BookOpen, Flame, GraduationCap, RefreshCw, Trash2, Search, Plus, Network, LogOut, Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { toast } from "sonner";
@@ -66,6 +66,7 @@ export default function Home() {
   const [usuario, setUsuario] = useState<Usuario | null>(null);
   const [loading, setLoading] = useState(false);
   const [guardando, setGuardando] = useState(false);
+  const [loadingHistorial, setLoadingHistorial] = useState(true); // Iniciar en true para mostrar loader inmediatamente
   const [carreras, setCarreras] = useState<string[]>([]);
   const [carreraSeleccionada, setCarreraSeleccionada] = useState<string>("");
   const [cicloSeleccionado, setCicloSeleccionado] = useState<string>("1");
@@ -83,6 +84,9 @@ export default function Home() {
   // Carga inicial de datos (solo una vez al montar)
   useEffect(() => {
     const loadData = async () => {
+      // Activar loading inmediatamente al inicio
+      setLoadingHistorial(true);
+      
       try {
         // Obtener usuario de Supabase primero
         const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser();
@@ -134,7 +138,7 @@ export default function Home() {
               
               localStorage.setItem('usuario', JSON.stringify(backendUser));
               
-              // Cargar historial del servidor
+              // Cargar historial del servidor (loading ya está activo desde el inicio del useEffect)
               try {
                 const historialUrl = `/api/usuario/${currentUser.id}/historial${backendUser.carrera ? `?carrera=${encodeURIComponent(backendUser.carrera)}` : ''}`;
                 const historialResponse = await axios.get(historialUrl);
@@ -159,66 +163,21 @@ export default function Home() {
                     console.error("Error al parsear historial de localStorage:", e);
                   }
                 }
+              } finally {
+                setLoadingHistorial(false);
               }
             }
           } catch (err) {
             console.error("Error al cargar datos del usuario:", err);
           }
         } else {
-          // Si NO hay usuario autenticado, usar localStorage como fallback
-          const savedUser = localStorage.getItem('usuario');
-          const savedHistorial = localStorage.getItem('historial');
-          const savedMaxCreditos = localStorage.getItem('maxCreditos');
-          const savedCarrera = localStorage.getItem('carrera');
-          
-          if (savedCarrera) {
-            setCarreraSeleccionada(savedCarrera);
-          }
-          
-          if (savedUser) {
-            try {
-              const parsedUser = JSON.parse(savedUser);
-              setUsuario(parsedUser);
-              if (parsedUser.carrera && !savedCarrera) {
-                setCarreraSeleccionada(parsedUser.carrera);
-                localStorage.setItem('carrera', parsedUser.carrera);
-              }
-            } catch (e) {
-              console.error("Error al parsear usuario de localStorage:", e);
-            }
-          }
-          
-          if (savedHistorial) {
-            try {
-              const historialParsed = JSON.parse(savedHistorial);
-              if (Array.isArray(historialParsed)) {
-                const historialConvertido: CursoAprobado[] = historialParsed.map((item: unknown) => {
-                  if (typeof item === 'object' && item !== null && 'curso_codigo' in item) {
-                    return item as CursoAprobado;
-                  }
-                  const optionItem = item as Option;
-                  const carrera = savedCarrera || '';
-                  return {
-                    curso_codigo: optionItem.codigo || optionItem.value?.split('|')[0] || optionItem.value,
-                    carrera: optionItem.carrera || carrera,
-                    nombre: optionItem.label
-                  };
-                });
-                setHistorial(historialConvertido);
-                setHistorialOriginal(historialConvertido);
-              }
-            } catch (e) {
-              console.error("Error al parsear historial de localStorage:", e);
-            }
-          }
-          
-          if (savedMaxCreditos) {
-            try {
-              setMaxCreditos([parseInt(savedMaxCreditos)]);
-            } catch (e) {
-              console.error("Error al parsear maxCreditos de localStorage:", e);
-            }
-          }
+          // Si NO hay usuario autenticado, simplemente dejar todo vacío
+          // No usar localStorage - el usuario debe iniciar sesión para guardar datos
+          setUsuario(null);
+          setHistorial([]);
+          setHistorialOriginal([]);
+          setCarreraSeleccionada("");
+          setLoadingHistorial(false); // Desactivar loading si no hay usuario
         }
         
         // Si hay error de autenticación, simplemente continuar sin usuario
@@ -235,16 +194,18 @@ export default function Home() {
 
   // El historial ahora se carga directamente desde el endpoint en loadData
 
-  // Guardar cambios en localStorage cuando cambian
+  // Solo guardar en localStorage si hay usuario autenticado
   useEffect(() => {
-    if (historial.length > 0) {
+    if (user?.id && historial.length > 0) {
       localStorage.setItem('historial', JSON.stringify(historial));
     }
-  }, [historial]);
+  }, [historial, user?.id]);
 
   useEffect(() => {
-    localStorage.setItem('maxCreditos', maxCreditos[0].toString());
-  }, [maxCreditos]);
+    if (user?.id) {
+      localStorage.setItem('maxCreditos', maxCreditos[0].toString());
+    }
+  }, [maxCreditos, user?.id]);
 
   // Cargar cursos cuando cambia la carrera (carrera es obligatoria)
   useEffect(() => {
@@ -292,21 +253,9 @@ export default function Home() {
         
         setCatalogo(catalogoTransformado);
         
-        // Recargar historial si el usuario está autenticado y cambió la carrera
-        // Usar el estado user en lugar de llamar a getUser() nuevamente
-        if (user && usuario) {
-          try {
-            const historialUrl = `/api/usuario/${user.id}/historial?carrera=${encodeURIComponent(carreraSeleccionada)}`;
-            const historialResponse = await axios.get(historialUrl);
-            if (historialResponse.data) {
-              const cursos = historialResponse.data.cursos || [];
-              setHistorial(cursos);
-              setHistorialOriginal(cursos); // Actualizar historial original
-            }
-          } catch (historialErr) {
-            console.error("Error al recargar historial:", historialErr);
-          }
-        }
+        // NOTA: El historial se recarga cuando el usuario cambia la carrera manualmente
+        // (ver el onValueChange del Select de carrera). No recargar aquí para evitar
+        // llamadas duplicadas cuando se establece la carrera inicialmente desde el backend.
       } catch (err) {
         console.error("Error API cursos:", err);
         setCatalogo([]);
@@ -357,10 +306,7 @@ export default function Home() {
     setHistorial(nuevoHistorial);
     setBusqueda("");
     
-    // Si no hay usuario autenticado (verificar con user de Supabase), guardar en localStorage inmediatamente
-    if (!user?.id) {
-      localStorage.setItem('historial', JSON.stringify(nuevoHistorial));
-    }
+    // Sin usuario, no guardar en localStorage - el usuario debe iniciar sesión
   };
 
   const eliminarCurso = (curso: CursoAprobado) => {
@@ -369,10 +315,7 @@ export default function Home() {
     );
     setHistorial(nuevoHistorial);
     
-    // Si no hay usuario autenticado (verificar con user de Supabase), guardar en localStorage inmediatamente
-    if (!user?.id) {
-      localStorage.setItem('historial', JSON.stringify(nuevoHistorial));
-    }
+    // Sin usuario, no guardar en localStorage - el usuario debe iniciar sesión
   };
 
   // Verificar si hay cambios pendientes
@@ -556,32 +499,37 @@ export default function Home() {
       }
       
       // Recargar historial completo desde el backend
-      const historialResponse = await axios.get(historialUrl);
-      if (historialResponse.data) {
-        const cursos = historialResponse.data.cursos || [];
-        setHistorial(cursos);
-        setHistorialOriginal(cursos); // Actualizar historial original
-        
-        // Actualizar créditos totales del usuario
-        const totalCreditos = historialResponse.data.total_creditos || 0;
-        if (usuario) {
-          const usuarioActualizado = {
-            ...usuario,
-            creditos_totales: totalCreditos
-          };
-          setUsuario(usuarioActualizado);
-          localStorage.setItem('usuario', JSON.stringify(usuarioActualizado));
+      try {
+        setLoadingHistorial(true);
+        const historialResponse = await axios.get(historialUrl);
+        if (historialResponse.data) {
+          const cursos = historialResponse.data.cursos || [];
+          setHistorial(cursos);
+          setHistorialOriginal(cursos); // Actualizar historial original
           
-          // Actualizar créditos totales en el backend
-          try {
-            await axios.put(`/api/usuario/${userIdParaUsar}`, {
+          // Actualizar créditos totales del usuario
+          const totalCreditos = historialResponse.data.total_creditos || 0;
+          if (usuario) {
+            const usuarioActualizado = {
+              ...usuario,
               creditos_totales: totalCreditos
-            });
-          } catch (error) {
-            console.error("Error al actualizar créditos totales:", error);
-            // No bloquear el flujo si falla la actualización de créditos
+            };
+            setUsuario(usuarioActualizado);
+            localStorage.setItem('usuario', JSON.stringify(usuarioActualizado));
+            
+            // Actualizar créditos totales en el backend
+            try {
+              await axios.put(`/api/usuario/${userIdParaUsar}`, {
+                creditos_totales: totalCreditos
+              });
+            } catch (error) {
+              console.error("Error al actualizar créditos totales:", error);
+              // No bloquear el flujo si falla la actualización de créditos
+            }
           }
         }
+      } finally {
+        setLoadingHistorial(false);
       }
       
       toast.success("Cambios guardados exitosamente");
@@ -590,6 +538,7 @@ export default function Home() {
       toast.error("Error al guardar cambios. Por favor, intenta nuevamente.");
     } finally {
       setGuardando(false);
+      setLoadingHistorial(false);
     }
   };
 
@@ -663,7 +612,7 @@ export default function Home() {
               <GraduationCap className="w-8 h-8 text-primary" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold tracking-tight">UPC Planner IA</h1>
+              <h1 className="text-2xl font-bold tracking-tight">UPC Planner</h1>
               <p className="text-muted-foreground text-sm">Complejidad Algoritmica</p>
             </div>
           </div>
@@ -680,7 +629,29 @@ export default function Home() {
                 className="gap-2"
                 onClick={async () => {
                   await supabase.auth.signOut();
+                  
+                  // Limpiar todos los estados del usuario
                   setUser(null);
+                  setUsuario(null);
+                  setHistorial([]);
+                  setHistorialOriginal([]);
+                  setCatalogo([]);
+                  setCarreraSeleccionada("");
+                  setRecomendados([]);
+                  setDisponibles([]);
+                  setEditandoInfo(false);
+                  setInfoEditada({
+                    codigo_alumno: '',
+                    carrera: ''
+                  });
+                  setBusqueda("");
+                  setLoadingHistorial(false);
+                  
+                  // Limpiar localStorage
+                  localStorage.removeItem('usuario');
+                  localStorage.removeItem('historial');
+                  localStorage.removeItem('carrera');
+                  
                   router.refresh();
                 }}
               >
@@ -768,7 +739,7 @@ export default function Home() {
                     <p className="font-semibold font-mono">{usuario.codigo_alumno || '—'}</p>
                   )
                 ) : (
-                  <p className="font-semibold font-mono text-muted-foreground">Cargando...</p>
+                  <p className="font-semibold font-mono text-muted-foreground">—</p>
                 )}
               </div>
               <div>
@@ -798,7 +769,7 @@ export default function Home() {
                     <p className="font-semibold">{usuario.carrera || '—'}</p>
                   )
                 ) : (
-                  <p className="font-semibold text-muted-foreground">Cargando...</p>
+                  <p className="font-semibold text-muted-foreground">—</p>
                 )}
               </div>
               <div>
@@ -806,7 +777,7 @@ export default function Home() {
                 {usuario ? (
                   <p className="font-semibold">{usuario.creditos_totales ?? 0} créditos</p>
                 ) : (
-                  <p className="font-semibold text-muted-foreground">Cargando...</p>
+                  <p className="font-semibold text-muted-foreground">—</p>
                 )}
               </div>
             </div>
@@ -828,7 +799,10 @@ export default function Home() {
                 value={carreraSeleccionada}
                 onValueChange={(value) => {
                   setCarreraSeleccionada(value);
-                  localStorage.setItem('carrera', value);
+                  // Solo guardar en localStorage si hay usuario autenticado
+                  if (user?.id) {
+                    localStorage.setItem('carrera', value);
+                  }
                   
                   axios.get(`/api/cursos?carrera=${encodeURIComponent(value)}`)
                     .then(res => {
@@ -865,6 +839,25 @@ export default function Home() {
                       console.error("Error al filtrar cursos por carrera:", err);
                       setCatalogo([]);
                     });
+                    
+                  // Recargar historial cuando el usuario cambia la carrera manualmente
+                  if (user?.id && usuario) {
+                    setLoadingHistorial(true);
+                    axios.get(`/api/usuario/${user.id}/historial?carrera=${encodeURIComponent(value)}`)
+                      .then(res => {
+                        if (res.data) {
+                          const cursos = res.data.cursos || [];
+                          setHistorial(cursos);
+                          setHistorialOriginal(cursos);
+                        }
+                      })
+                      .catch(err => {
+                        console.error("Error al recargar historial:", err);
+                      })
+                      .finally(() => {
+                        setLoadingHistorial(false);
+                      });
+                  }
                 }}
               >
                 <SelectTrigger className="w-full">
@@ -1009,7 +1002,12 @@ export default function Home() {
             )}
 
             <ScrollArea className="h-[300px] w-full rounded-md border">
-              {historial.length === 0 ? (
+              {loadingHistorial ? (
+                <div className="p-8 text-sm text-muted-foreground flex flex-col items-center justify-center gap-2">
+                  <Loader2 className="w-8 h-8 animate-spin text-primary"/>
+                  <span>Cargando historial académico...</span>
+                </div>
+              ) : historial.length === 0 ? (
                 <div className="p-8 text-sm text-muted-foreground flex flex-col items-center justify-center gap-2 opacity-50">
                   <BookOpen className="w-8 h-8"/>
                   <span>Sin historial académico</span>

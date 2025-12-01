@@ -12,7 +12,7 @@ export async function GET(request: Request) {
     
     if (!error && data.user && data.session) {
       // Registrar/iniciar sesión en el backend después de OAuth
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://complejidad-recomendador.onrender.com'
       
       try {
         await fetch(`${backendUrl}/api/auth/login`, {

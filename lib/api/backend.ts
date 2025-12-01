@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { createClient } from '@/lib/supabase/client';
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://complejidad-recomendador.onrender.com';
 
 export async function getAuthenticatedBackendClient() {
   const supabase = createClient();
